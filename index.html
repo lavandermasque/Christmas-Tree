@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grand Luxury Christmas Tree</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Great+Vibes&display=swap" rel="stylesheet">
+    
+    <!-- Babel for in-browser transpilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+      body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #050505; overflow: hidden; }
+      #root { width: 100%; height: 100%; }
+      ::-webkit-scrollbar { display: none; }
+      
+      .loader {
+        border: 4px solid #333;
+        border-top: 4px solid #d4af37;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        margin-top: -20px;
+        margin-left: -20px;
+        z-index: 1000;
+      }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+
+    <!-- Import Map: Explicitly pinned versions for stability. React 19 removed. -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react/": "https://esm.sh/react@18.2.0/",
+        "react-dom": "https://esm.sh/react-dom@18.2.0",
+        "react-dom/": "https://esm.sh/react-dom@18.2.0/",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "three": "https://esm.sh/three@0.160.0",
+        "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.15.12?external=react,react-dom,three",
+        "@react-three/drei": "https://esm.sh/@react-three/drei@9.96.1?external=react,react-dom,three,@react-three/fiber",
+        "@react-three/postprocessing": "https://esm.sh/@react-three/postprocessing@2.16.0?external=react,react-dom,three,@react-three/fiber",
+        "uuid": "https://esm.sh/uuid@9.0.1"
+      }
+    }
+    </script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+    <div id="root">
+        <div class="loader"></div>
+    </div>
+
+    <!-- MAIN APPLICATION SCRIPT -->
+    <script type="text/babel" data-type="module" data-presets="react">
+        import React, { useState, useRef, useMemo, useLayoutEffect, useEffect, Suspense } from 'react';
+        import ReactDOM from 'react-dom/client';
+        import * as THREE from 'three';
+        import { Canvas, useFrame } from '@react-three/fiber';
+        import { Environment, OrbitControls, ContactShadows, Stars, Sparkles } from '@react-three/drei';
+        import { EffectComposer, Bloom, DepthOfField, Vignette } from '@react-three/postprocessing';
+
+        // -----------------------------------------------------------------------------
+        // 1. CONSTANTS
+        // -----------------------------------------------------------------------------
+        
+        const TreeState = {
+          ASSEMBLED: 'ASSEMBLED',
+          SCATTERED: 'SCATTERED'
+        };
+
+        const COLORS = {
+          GOLD: new THREE.Color('#FFD700'),       
+          METALLIC_GOLD: new THREE.Color('#D4AF37'), 
+          CHRISTMAS_RED: new THREE.Color('#E60023'), 
+          CRIMSON: new THREE.Color('#8B0000'),      
+          FOREST_GREEN: new THREE.Color('#0f5132'), 
+          EMERALD: new THREE.Color('#023020'),      
+          PINE: new THREE.Color('#014421'),         
+          SILVER: new THREE.Color('#E5E7EB'),       
+          SNOW_WHITE: new THREE.Color('#FFFFFF'),   
+          WARM_WHITE: new THREE.Color('#FFF5E1'),   
+        };
+
+        const PALETTE = [
+          COLORS.METALLIC_GOLD,
+          COLORS.GOLD,
+          COLORS.CHRISTMAS_RED,
+          COLORS.CHRISTMAS_RED, 
+          COLORS.CRIMSON,
+          COLORS.FOREST_GREEN,
+          COLORS.FOREST_GREEN, 
+          COLORS.FOREST_GREEN,
+          COLORS.PINE,
+          COLORS.PINE,
+          COLORS.SILVER,
+          COLORS.SNOW_WHITE,
+          COLORS.WARM_WHITE
+        ];
+
+        const TREE_CONFIG = {
+          count: 1800, 
+          radius: 3.5, 
+          height: 9,   
+          spin: 15     
+        };
+
+        const ANIMATION_SPEED = 1.1;
+
+        // -----------------------------------------------------------------------------
+        // 2. COMPONENTS
+        // -----------------------------------------------------------------------------
+
+        // --- TreePart ---
+        const TreePart = ({ geometry, material, count, data, treeState }) => {
+          const meshRef = useRef(null);
+          const tempObject = useMemo(() => new THREE.Object3D(), []);
+          
+          useLayoutEffect(() => {
+            if (!meshRef.current) return;
+            for (let i = 0; i < count; i++) {
+              const pos = data.treePos[i]; 
+              tempObject.position.copy(pos);
+              tempObject.scale.setScalar(data.scales[i]);
+              tempObject.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+              tempObject.updateMatrix();
+              meshRef.current.setMatrixAt(i, tempObject.matrix);
+              meshRef.current.setColorAt(i, data.colors[i]);
+            }
+            meshRef.current.instanceMatrix.needsUpdate = true;
+            if (meshRef.current.instanceColor) meshRef.current.instanceColor.needsUpdate = true;
+          }, [count, data, tempObject]);
+
+          useFrame((state, delta) => {
+            if (!meshRef.current) return;
+
+            const isAssembled = treeState === TreeState.ASSEMBLED;
+            let needsUpdate = false;
+
+            for (let i = 0; i < count; i++) {
+              meshRef.current.getMatrixAt(i, tempObject.matrix);
+              tempObject.matrix.decompose(tempObject.position, tempObject.quaternion, tempObject.scale);
+
+              const targetPos = isAssembled ? data.treePos[i] : data.scatterPos[i];
+              const dist = tempObject.position.distanceTo(targetPos);
+              
+              if (dist > 0.01) {
+                needsUpdate = true;
+                const randomSpeedFactor = 0.5 + (i % 10) * 0.1;
+                const speed = ANIMATION_SPEED * randomSpeedFactor;
+                
+                if (dist > 0.5) {
+                  const swirlIntensity = isAssembled ? 3.0 : 0.5;
+                  const angle = delta * speed * 0.1 * swirlIntensity;
+                  const x = tempObject.position.x;
+                  const z = tempObject.position.z;
+                  tempObject.position.x = x * Math.cos(angle) - z * Math.sin(angle);
+                  tempObject.position.z = x * Math.sin(angle) + z * Math.cos(angle);
+                }
+
+                tempObject.position.lerp(targetPos, speed * delta);
+                
+                const movementIntensity = Math.min(dist, 1.0); 
+                const tumbleSpeed = speed * movementIntensity;
+                
+                tempObject.rotation.x += delta * tumbleSpeed;
+                tempObject.rotation.y += delta * tumbleSpeed;
+
+                tempObject.updateMatrix();
+                meshRef.current.setMatrixAt(i, tempObject.matrix);
+              } else if (dist > 0.001) {
+                   needsUpdate = true;
+                   tempObject.position.lerp(targetPos, 0.2);
+                   tempObject.updateMatrix();
+                   meshRef.current.setMatrixAt(i, tempObject.matrix);
+              }
+            }
+
+            if (needsUpdate) {
+              meshRef.current.instanceMatrix.needsUpdate = true;
+            }
+          });
+
+          return (
+            <instancedMesh ref={meshRef} args={[geometry, material, count]} castShadow receiveShadow />
+          );
+        };
+
+        // --- GlowingRibbon ---
+        const GlowingRibbon = ({ treeState }) => {
+          const meshRef = useRef(null);
+          const tempObject = useMemo(() => new THREE.Object3D(), []);
+          const LIGHT_COUNT = 400; 
+          
+          const { curvePoints } = useMemo(() => {
+            const points = [];
+            const turns = 5; 
+            for (let i = 0; i <= 100; i++) {
+              const t = i / 100;
+              const height = (t - 0.5) * TREE_CONFIG.height;
+              const drapeNoise = Math.sin(t * Math.PI * turns * 2) * 0.25;
+              const radius = ((1 - t) * TREE_CONFIG.radius) + 1.2 + drapeNoise; 
+              const angle = t * Math.PI * 2 * turns;
+              points.push(new THREE.Vector3(Math.cos(angle) * radius, height, Math.sin(angle) * radius));
+            }
+            const curve = new THREE.CatmullRomCurve3(points);
+            return { curvePoints: curve.getSpacedPoints(LIGHT_COUNT) };
+          }, []);
+
+          const animState = useRef({ progress: 0, expansion: 1 });
+
+          useFrame((state, delta) => {
+            if (!meshRef.current) return;
+            const isAssembled = treeState === TreeState.ASSEMBLED;
+            const time = state.clock.elapsedTime;
+            const targetProgress = isAssembled ? 1.0 : 0.0;
+            const targetExpansion = isAssembled ? 1.0 : 3.0;
+            const progressSpeed = isAssembled ? ANIMATION_SPEED * 0.4 : ANIMATION_SPEED * 0.8;
+            const expansionSpeed = ANIMATION_SPEED * 0.5;
+
+            animState.current.progress = THREE.MathUtils.lerp(animState.current.progress, targetProgress, delta * progressSpeed);
+            animState.current.expansion = THREE.MathUtils.lerp(animState.current.expansion, targetExpansion, delta * expansionSpeed);
+
+            const { progress, expansion } = animState.current;
+
+            for (let i = 0; i < LIGHT_COUNT; i++) {
+              const normalizedIndex = i / LIGHT_COUNT;
+              const basePos = curvePoints[i];
+
+              tempObject.position.set(basePos.x * expansion, basePos.y, basePos.z * expansion);
+
+              let scale = 0;
+              if (normalizedIndex < progress) {
+                const tipThreshold = 0.05; 
+                const distFromTip = progress - normalizedIndex;
+                let baseScale = 1.0;
+                if (distFromTip < tipThreshold) baseScale = distFromTip / tipThreshold;
+                const twinkleSpeed = 2.5;
+                const twinkleOffset = i * 0.15; 
+                const twinkle = 0.6 + Math.sin(time * twinkleSpeed + twinkleOffset) * 0.4;
+                scale = baseScale * twinkle * 1.2;
+              }
+              tempObject.scale.setScalar(scale);
+              tempObject.updateMatrix();
+              meshRef.current.setMatrixAt(i, tempObject.matrix);
+            }
+            meshRef.current.instanceMatrix.needsUpdate = true;
+            if (isAssembled) meshRef.current.rotation.y += delta * 0.08;
+            else meshRef.current.rotation.y -= delta * 0.05;
+          });
+
+          return (
+            <instancedMesh ref={meshRef} args={[undefined, undefined, LIGHT_COUNT]}>
+              <sphereGeometry args={[0.07, 8, 8]} />
+              <meshStandardMaterial color="#FFEDD5" emissive="#FFB700" emissiveIntensity={3.5} toneMapped={false} roughness={0.1} metalness={0.8} />
+            </instancedMesh>
+          );
+        };
+
+        // --- TopStar ---
+        const TopStar = ({ treeState }) => {
+          const meshRef = useRef(null);
+          const assembledPos = useMemo(() => new THREE.Vector3(0, TREE_CONFIG.height / 2 + 0.5, 0), []);
+          const scatterPos = useMemo(() => new THREE.Vector3(
+              (Math.random() - 0.5) * 8, 12 + Math.random() * 4, (Math.random() - 0.5) * 8
+          ), []);
+
+          const starGeometry = useMemo(() => {
+            const starShape = new THREE.Shape();
+            const points = 5;
+            const outerRadius = 0.6;
+            const innerRadius = 0.3;
+            for (let i = 0; i < points * 2; i++) {
+              const angle = (i / (points * 2)) * Math.PI * 2 - Math.PI / 2;
+              const radius = i % 2 === 0 ? outerRadius : innerRadius;
+              const x = Math.cos(angle) * radius;
+              const y = Math.sin(angle) * radius;
+              if (i === 0) starShape.moveTo(x, y);
+              else starShape.lineTo(x, y);
+            }
+            starShape.closePath();
+            return new THREE.ExtrudeGeometry(starShape, { depth: 0.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.05, bevelThickness: 0.05 });
+          }, []);
+
+          useFrame((state, delta) => {
+            if (meshRef.current) {
+              const isAssembled = treeState === TreeState.ASSEMBLED;
+              const target = isAssembled ? assembledPos : scatterPos;
+              meshRef.current.position.lerp(target, delta * ANIMATION_SPEED * 0.9);
+              if (isAssembled) {
+                meshRef.current.rotation.y += delta * 0.5;
+                meshRef.current.rotation.x = THREE.MathUtils.lerp(meshRef.current.rotation.x, 0, delta * 2);
+                meshRef.current.rotation.z = THREE.MathUtils.lerp(meshRef.current.rotation.z, 0, delta * 2);
+              } else {
+                meshRef.current.rotation.x += delta * 0.3;
+                meshRef.current.rotation.y += delta * 0.2;
+                meshRef.current.rotation.z += delta * 0.1;
+              }
+            }
+          });
+
+          return (
+            <mesh ref={meshRef} geometry={starGeometry} position={assembledPos} castShadow>
+              <meshStandardMaterial color={COLORS.GOLD} emissive={COLORS.GOLD} emissiveIntensity={2} toneMapped={false} roughness={0.1} metalness={1} />
+              <pointLight intensity={3} color="#ffd700" distance={8} decay={2} />
+            </mesh>
+          );
+        };
+
+        // --- LuxuryTree ---
+        const LuxuryTree = ({ treeState }) => {
+          const groupRef = useRef(null);
+
+          const { ornaments, gifts, stars, candyCanes } = useMemo(() => {
+            const generateData = (count, radialJitter = 0.2, heightJitter = 0) => {
+              const treePos = [];
+              const scatterPos = [];
+              const scales = [];
+              const colors = [];
+
+              for (let i = 0; i < count; i++) {
+                const t = i / count;
+                const h = TREE_CONFIG.height * t + (Math.random() - 0.5) * heightJitter; 
+                const r = TREE_CONFIG.radius * (1 - t) + Math.random() * radialJitter; 
+                const angle = t * TREE_CONFIG.spin * Math.PI * 2 + (Math.random() * Math.PI * 2); 
+                
+                const x = Math.cos(angle) * r;
+                const z = Math.sin(angle) * r;
+                const y = h - (TREE_CONFIG.height / 2); 
+
+                treePos.push(new THREE.Vector3(x, y, z));
+
+                const u = Math.random();
+                const v = Math.random();
+                const theta = 2 * Math.PI * u;
+                const phi = Math.acos(2 * v - 1);
+                const scatterR = 7 + Math.random() * 9; 
+                const sx = scatterR * Math.sin(phi) * Math.cos(theta);
+                const sy = scatterR * Math.sin(phi) * Math.sin(theta);
+                const sz = scatterR * Math.cos(phi);
+                scatterPos.push(new THREE.Vector3(sx, sy, sz));
+
+                scales.push(Math.random() * 0.6 + 0.4);
+                colors.push(PALETTE[Math.floor(Math.random() * PALETTE.length)]);
+              }
+              return { treePos, scatterPos, scales, colors };
+            };
+
+            return {
+              ornaments: generateData(Math.floor(TREE_CONFIG.count * 0.45), 0.3),
+              gifts: generateData(Math.floor(TREE_CONFIG.count * 0.2), 0.4),
+              stars: generateData(Math.floor(TREE_CONFIG.count * 0.15), 0.5),
+              candyCanes: generateData(Math.floor(TREE_CONFIG.count * 0.2), 0.4),
+            };
+          }, []);
+
+          const sphereGeo = useMemo(() => new THREE.SphereGeometry(0.15, 16, 16), []);
+          const boxGeo = useMemo(() => new THREE.BoxGeometry(0.22, 0.22, 0.22), []);
+          const smallStarGeo = useMemo(() => new THREE.OctahedronGeometry(0.2, 0), []);
+          
+          const candyCaneGeo = useMemo(() => {
+            const curve = new THREE.CatmullRomCurve3([
+              new THREE.Vector3(0, 0, 0),
+              new THREE.Vector3(0, 0.35, 0),
+              new THREE.Vector3(0.1, 0.45, 0),
+              new THREE.Vector3(0.25, 0.35, 0),
+            ]);
+            const geo = new THREE.TubeGeometry(curve, 8, 0.04, 8, false);
+            geo.center();
+            return geo;
+          }, []);
+
+          const ornamentMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.1, metalness: 0.8, envMapIntensity: 1.5 }), []);
+          const giftMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25, metalness: 0.4 }), []);
+          const starMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: COLORS.GOLD, roughness: 0.1, metalness: 1.0, emissive: COLORS.GOLD, emissiveIntensity: 0.4 }), []);
+          const candyMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.15, metalness: 0.6 }), []);
+
+          useFrame((state, delta) => {
+            if (groupRef.current && treeState === TreeState.ASSEMBLED) {
+              groupRef.current.rotation.y += delta * 0.1;
+            }
+          });
+
+          return (
+            <group ref={groupRef}>
+              <GlowingRibbon treeState={treeState} />
+              <TreePart geometry={sphereGeo} material={ornamentMaterial} count={ornaments.treePos.length} data={ornaments} treeState={treeState} />
+              <TreePart geometry={boxGeo} material={giftMaterial} count={gifts.treePos.length} data={gifts} treeState={treeState} />
+              <TreePart geometry={smallStarGeo} material={starMaterial} count={stars.treePos.length} data={stars} treeState={treeState} />
+              <TreePart geometry={candyCaneGeo} material={candyMaterial} count={candyCanes.treePos.length} data={candyCanes} treeState={treeState} />
+              <TopStar treeState={treeState} />
+            </group>
+          );
+        };
+
+        // --- FloatingParticles ---
+        const FloatingParticles = () => {
+          const count = 500;
+          const mesh = useRef(null);
+          const dummy = useMemo(() => new THREE.Object3D(), []);
+          
+          const particles = useMemo(() => {
+            const temp = [];
+            for (let i = 0; i < count; i++) {
+              temp.push({
+                t: Math.random() * 100,
+                factor: 20 + Math.random() * 100,
+                speed: 0.01 + Math.random() / 200,
+                xFactor: -50 + Math.random() * 100,
+                yFactor: -50 + Math.random() * 100,
+                zFactor: -50 + Math.random() * 100,
+                mx: 0, my: 0
+              });
+            }
+            return temp;
+          }, []);
+
+          useFrame((state) => {
+            if (!mesh.current) return;
+            const t = state.clock.getElapsedTime();
+            particles.forEach((particle, i) => {
+              let { factor, speed, xFactor, yFactor, zFactor } = particle;
+              const x = (particle.mx / 10) * xFactor + Math.cos(t * speed * 0.5) * xFactor + Math.sin(t * 0.3) * 5;
+              const y = (particle.my / 10) * yFactor + Math.sin(t * speed * 0.5) * yFactor + Math.cos(t * 0.5) * 5;
+              const z = (particle.mx / 10) * zFactor + Math.cos(t * speed * 0.5) * zFactor + Math.sin(t * 0.3) * 5;
+              dummy.position.set(x, y, z);
+              dummy.scale.setScalar(0.5 + Math.sin(t * 2 + i) * 0.3);
+              dummy.rotation.set(x, y, z);
+              dummy.updateMatrix();
+              mesh.current.setMatrixAt(i, dummy.matrix);
+            });
+            mesh.current.instanceMatrix.needsUpdate = true;
+          });
+
+          return (
+            <instancedMesh ref={mesh} args={[undefined, undefined, count]}>
+              <dodecahedronGeometry args={[0.05, 0]} />
+              <meshBasicMaterial color="#ffffff" transparent opacity={0.6} blending={THREE.AdditiveBlending} />
+            </instancedMesh>
+          );
+        };
+
+        // --- Scene ---
+        const Scene = ({ treeState }) => {
+          return (
+            <Canvas
+              dpr={[1, 2]}
+              camera={{ position: [0, 0, 16], fov: 40 }}
+              gl={{ antialias: false, stencil: false, depth: true, powerPreference: "high-performance" }}
+            >
+              <color attach="background" args={['#020202']} />
+              <fog attach="fog" args={['#020202', 20, 45]} />
+              <Stars radius={80} depth={60} count={5000} factor={4} saturation={0} fade speed={0.5} />
+              <Sparkles count={200} scale={[20, 20, 20]} size={2} speed={0.3} opacity={0.3} color="#fff" />
+
+              <ambientLight intensity={0.5} color="#050505" /> 
+              <spotLight position={[10, 15, 10]} angle={0.2} penumbra={0.5} intensity={300} castShadow color="#ffddaa" shadow-bias={-0.0001}/>
+              <spotLight position={[-10, 10, -10]} angle={0.4} penumbra={1} intensity={200} color="#e0f7fa" />
+              <pointLight position={[0, -5, 5]} intensity={50} color="#ffaa00" distance={15} />
+
+              <Suspense fallback={null}>
+                <group position={[0, -1.0, 0]}>
+                  <LuxuryTree treeState={treeState} />
+                  <FloatingParticles />
+                  <ContactShadows rotation-x={Math.PI / 2} position={[0, -4.5, 0]} opacity={0.6} width={40} height={40} blur={2.5} far={10} color="#000000"/>
+                </group>
+                <Environment preset="lobby" background={false} /> 
+              </Suspense>
+
+              <EffectComposer enableNormalPass={false} multisampling={0}>
+                <Bloom luminanceThreshold={0.9} mipmapBlur intensity={1.0} radius={0.6} levels={9} />
+                <DepthOfField target={[0, -1, 0]} focalLength={0.02} bokehScale={2} height={480} />
+                <Vignette eskil={false} offset={0.2} darkness={0.6} />
+              </EffectComposer>
+
+              <OrbitControls enablePan={false} minPolarAngle={Math.PI / 4} maxPolarAngle={Math.PI / 1.8} minDistance={6} maxDistance={30} autoRotate={treeState === TreeState.SCATTERED} autoRotateSpeed={0.3} dampingFactor={0.05} />
+            </Canvas>
+          );
+        };
+
+        // --- Overlay ---
+        const Overlay = ({ treeState, onToggle }) => {
+          const isAssembled = treeState === TreeState.ASSEMBLED;
+          const [hasStarted, setHasStarted] = useState(false);
+          const [isPlaying, setIsPlaying] = useState(false);
+          const audioRef = useRef(null);
+
+          const handleStart = () => {
+            const audio = audioRef.current;
+            if (audio) {
+              audio.volume = 1.0;
+              if (audio.readyState === 0) audio.load();
+              const playPromise = audio.play();
+              if (playPromise !== undefined) {
+                playPromise
+                  .then(() => {
+                    console.log("Audio started");
+                    setIsPlaying(true);
+                  })
+                  .catch((err) => {
+                    console.warn("Audio autoplay blocked:", err.message);
+                    setIsPlaying(false);
+                  });
+              }
+            }
+            setHasStarted(true);
+          };
+
+          const toggleMusic = () => {
+            const audio = audioRef.current;
+            if (!audio) return;
+            if (isPlaying) {
+              audio.pause();
+              setIsPlaying(false);
+            } else {
+              audio.play().then(() => setIsPlaying(true)).catch(console.warn);
+            }
+          };
+
+          useEffect(() => {
+            const audio = audioRef.current;
+            if (!audio) return;
+            const onPlay = () => setIsPlaying(true);
+            const onPause = () => setIsPlaying(false);
+            const onError = () => { console.warn("Audio error"); setIsPlaying(false); };
+            audio.addEventListener('play', onPlay);
+            audio.addEventListener('pause', onPause);
+            audio.addEventListener('error', onError);
+            return () => {
+              audio.removeEventListener('play', onPlay);
+              audio.removeEventListener('pause', onPause);
+              audio.removeEventListener('error', onError);
+            };
+          }, []);
+
+          return (
+            <div className="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col justify-between z-50 overflow-hidden text-amber-50">
+              <audio ref={audioRef} loop preload="auto" crossOrigin="anonymous" playsInline>
+                <source src="https://actions.google.com/sounds/v1/holidays/jingle_bells.ogg" type="audio/ogg" />
+                <source src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Jingle_Bells_-_Kevin_MacLeod_-_no_voice.mp3" type="audio/mpeg" />
+              </audio>
+
+              <div className={`absolute inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center transition-opacity duration-1000 ease-in-out ${hasStarted ? 'opacity-0 pointer-events-none' : 'opacity-100 pointer-events-auto'}`}>
+                <div className="text-center space-y-8 transform transition-transform duration-700 hover:scale-105 relative z-50">
+                   <h1 className="font-['Cinzel'] text-4xl md:text-6xl text-transparent bg-clip-text bg-gradient-to-b from-amber-100 via-amber-300 to-amber-600 tracking-widest drop-shadow-[0_0_25px_rgba(212,175,55,0.5)] animate-pulse">MERRY CHRISTMAS</h1>
+                   <p className="font-serif text-amber-100/60 tracking-[0.3em] text-sm uppercase">WISH FOR YOUR WISH</p>
+                   <button onClick={handleStart} className="group relative px-10 py-4 overflow-hidden rounded-full border border-amber-500/30 bg-black/50 transition-all hover:bg-amber-900/20 hover:border-amber-400 cursor-pointer pointer-events-auto active:scale-95 z-50">
+                     <span className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-amber-400/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></span>
+                     <span className="font-['Cinzel'] font-bold tracking-widest text-amber-200 group-hover:text-white transition-colors relative z-10">ENTER EXPERIENCE</span>
+                   </button>
+                </div>
+              </div>
+
+              <div className={`flex flex-col w-full h-full transition-opacity duration-1000 delay-500 ${hasStarted ? 'opacity-100' : 'opacity-0'}`}>
+                <div className="absolute top-6 right-6 z-50 pointer-events-auto flex items-center gap-3">
+                  <span className={`text-xs font-serif tracking-widest text-amber-500/80 transition-opacity duration-500 ${isPlaying ? 'opacity-0' : 'opacity-100'}`}>{isPlaying ? 'MUSIC ON' : 'MUSIC OFF'}</span>
+                  <button onClick={toggleMusic} className="p-3 rounded-full bg-black/20 backdrop-blur-md border border-amber-500/20 text-amber-200 hover:bg-black/40 hover:text-white transition-all duration-300 group shadow-[0_0_10px_rgba(212,175,55,0.1)] hover:shadow-[0_0_15px_rgba(212,175,55,0.3)] cursor-pointer" title={isPlaying ? "Mute Music" : "Play Music"}>
+                    {isPlaying ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 opacity-70"><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>
+                    )}
+                  </button>
+                </div>
+
+                <div className="w-full flex flex-col items-center pt-8 md:pt-12 z-20 transition-all duration-1000 pointer-events-none">
+                  <div className="relative text-center">
+                    <h1 className="font-['Cinzel'] text-4xl sm:text-6xl md:text-7xl lg:text-8xl leading-tight text-transparent bg-clip-text bg-gradient-to-b from-amber-200 via-amber-400 to-amber-600 drop-shadow-[0_0_15px_rgba(251,191,36,0.5)] transition-all duration-1000 ease-out will-change-transform animate-pulse" style={{ opacity: isAssembled ? 1 : 0, transform: isAssembled ? 'scale(1) translateY(0)' : 'scale(0.9) translateY(-20px)', filter: isAssembled ? 'blur(0px)' : 'blur(10px)' }}>Merry Christmas</h1>
+                    <p className="font-['Great_Vibes'] text-xl sm:text-2xl md:text-4xl text-white/90 mt-2 drop-shadow-md transition-all duration-1000 delay-300 animate-pulse" style={{ opacity: isAssembled ? 1 : 0, transform: isAssembled ? 'translateY(0)' : 'translateY(-10px)' }}>Wishing you a bright and merry Christmas</p>
+                  </div>
+                </div>
+
+                <div className="flex-1 pointer-events-none"></div>
+
+                <div className="pointer-events-auto w-full flex flex-col items-center pb-8 md:pb-12 gap-4 flex-none z-50">
+                  <button onClick={onToggle} className="relative group overflow-hidden px-10 py-4 rounded-full border border-amber-500/30 bg-black/40 backdrop-blur-md transition-all duration-500 hover:border-amber-400/80 hover:bg-black/60 cursor-pointer shadow-[0_0_20px_rgba(212,175,55,0.2)] hover:shadow-[0_0_30px_rgba(212,175,55,0.4)]">
+                     <span className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-500/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></span>
+                     <span className="font-['Cinzel'] text-amber-100 tracking-widest uppercase text-sm font-bold">{isAssembled ? 'Scatter Magic' : 'Assemble Tree'}</span>
+                  </button>
+                  <p className="text-white/30 text-[10px] md:text-xs font-serif tracking-widest uppercase pointer-events-none">Drag to Rotate • Scroll to Zoom</p>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        // --- App ---
+        const App = () => {
+          const [treeState, setTreeState] = useState(TreeState.ASSEMBLED);
+          const toggleState = () => setTreeState(prev => prev === TreeState.ASSEMBLED ? TreeState.SCATTERED : TreeState.ASSEMBLED);
+
+          return (
+            <div className="w-full h-full relative bg-[#050505]">
+              <div className="absolute inset-0 z-0">
+                <Scene treeState={treeState} />
+              </div>
+              <Overlay treeState={treeState} onToggle={toggleState} />
+              <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_50%,rgba(0,0,0,0.6)_100%)] z-1" />
+            </div>
+          );
+        };
+
+        // --- MOUNTING ---
+        const rootElement = document.getElementById('root');
+        const root = ReactDOM.createRoot(rootElement);
+        root.render(<App />);
+    </script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
